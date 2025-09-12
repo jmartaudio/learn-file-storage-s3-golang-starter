@@ -12,6 +12,8 @@ import (
 )
 
 func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request) {
+	const maxMemory = 1 << 30 // 1GB
+
 	videoIDString := r.PathValue("videoID")
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {
@@ -30,13 +32,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
 		return
 	}
-	const maxMemory = 1 << 30 // 1GB
-	r.Body = http.MaxBytesReader(w, r.Body, maxMemory)
-	err = r.ParseMultipartForm(maxMemory)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "unable to read file", err)
-		return
-	}
+
+	r.ParseMultipartForm(maxMemory)
 
 	file, header, err := r.FormFile("video")
 	if err != nil {
@@ -60,22 +57,21 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Unable to create file on server", err)
 		return
 	}
-	defer os.Remove(dst.Name())
+	defer os.Remove("tubely-upload")
 	defer dst.Close()
 	if _, err = io.Copy(dst, file); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
 		return
 	}
 
-	dst.Seek(0, io.SeekStart)
+	file.Seek(0, io.SeekStart)
 
 	assetPath := getAssetPath(mediaType)
 
 	putObjectInput := &s3.PutObjectInput{
-		Bucket:      &cfg.s3Bucket,
-		Key:         &assetPath,
-		Body:        dst,
-		ContentType: &mediaType,
+		Bucket: &cfg.s3Bucket,
+		Key:    &assetPath,
+		Body:   file,
 	}
 	_, err = cfg.s3Client.PutObject(r.Context(), putObjectInput)
 	if err != nil {
@@ -94,11 +90,5 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	url := "https://" + cfg.s3Bucket + ".s3." + cfg.s3Region + ".amazonaws.com/" + assetPath
 	video.VideoURL = &url
-
-	err = cfg.db.UpdateVideo(video)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Error updating db", err)
-		return
-	}
 
 }
