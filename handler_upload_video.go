@@ -55,7 +55,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	dst, err := os.CreateTemp("", "tubely-upload.mp4")
+	dst, err := os.CreateTemp("/tmp/", "tubely-upload.mp4")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to create file on server", err)
 		return
@@ -66,10 +66,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Error saving file", err)
 		return
 	}
+	prefix, err := getVideoAspectRatio(dst.Name())
 
 	dst.Seek(0, io.SeekStart)
 
-	assetPath := getAssetPath(mediaType)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "error determining aspect ratio", err)
+	}
+
+	assetPath := prefix + "/" + getAssetPath(mediaType)
 
 	putObjectInput := &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
